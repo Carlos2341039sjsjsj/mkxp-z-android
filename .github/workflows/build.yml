@@ -1,0 +1,53 @@
+name: Build mkxp-z core Android arm64
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: white-axe/mkxp-z
+          ref: libretro
+          submodules: recursive
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake python3-pip autoconf automake libtool universal-ctags ruby zip curl
+          pip3 install meson
+          curl -L https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-30/wasi-sdk-30.0-x86_64-linux.tar.gz | sudo tar xz -C /opt
+          sudo mv /opt/wasi-sdk-30.0-x86_64-linux /opt/wasi-sdk
+          curl -L https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | sudo tar xz -C /opt
+          sudo mv /opt/binaryen-version_119 /opt/binaryen
+      - name: Stage 1
+        run: |
+          cd libretro
+          make WASI_SDK=/opt/wasi-sdk WASM_OPT=/opt/binaryen/bin/wasm-opt CTAGS=$(which ctags)
+      - name: Cross file
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cat > $RUNNER_TEMP/android.ini <<INI
+          [binaries]
+          c = '$TC/aarch64-linux-android26-clang'
+          cpp = '$TC/aarch64-linux-android26-clang++'
+          ar = '$TC/llvm-ar'
+          strip = '$TC/llvm-strip'
+          cmake = '/usr/bin/cmake'
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          INI
+      - name: Stage 2
+        run: |
+          meson setup build --cross-file $RUNNER_TEMP/android.ini -Dlibretro=true --buildtype=release
+          ninja -C build
+      - name: List
+        if: always()
+        run: find . -name "*libretro*.so" | head
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mkxp-z-android-arm64
+          path: build/**/*.so
